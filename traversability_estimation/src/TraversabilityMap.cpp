@@ -182,6 +182,7 @@ void TraversabilityMap::publishTraversabilityMap() {
     grid_map::GridMapRosConverter::toMessage(traversabilityMapCopy, mapMessage);
     mapMessage.info.pose.position.z = zPosition_;
     traversabilityMapPublisher_.publish(mapMessage);
+    ROS_DEBUG_STREAM("[TraversabilityMap::publishTraversabilityMap] Publishing the traversability map !!!");
   }
 }
 

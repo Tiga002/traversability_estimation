@@ -28,7 +28,7 @@ TraversabilityEstimation::TraversabilityEstimation(ros::NodeHandle& nodeHandle)
       stepType_("traversability_step"),
       roughnessType_("traversability_roughness"),
       robotSlopeType_("robot_slope"),
-      getImageCallback_(false),
+      getImageCallback_(true),
       useRawMap_(false) {
   ROS_DEBUG("Traversability estimation node started.");
   readParameters();
@@ -215,7 +215,16 @@ bool TraversabilityEstimation::updateTraversability() {
       return false;
     }
   } else {
-    if (!traversabilityMap_.computeTraversability()) return false;
+    //if (!traversabilityMap_.computeTraversability()) return false;
+    ROS_DEBUG("Sending request to %s.", submapServiceName_.c_str());
+    if (requestElevationMap(elevationMap)) {
+      ROS_INFO("HERE !!!");
+      traversabilityMap_.setElevationMap(elevationMap);
+      if (!traversabilityMap_.computeTraversability()) return false;
+    } else {
+      ROS_WARN_THROTTLE(periodThrottledConsoleMessages, "Failed to retrieve elevation grid map.");
+      return false;
+    }
   }
 
   return true;
@@ -248,10 +257,18 @@ bool TraversabilityEstimation::updateParameter(std_srvs::Empty::Request&, std_sr
 bool TraversabilityEstimation::requestElevationMap(grid_map_msgs::GridMap& map) {
   submapPoint_.header.stamp = ros::Time(0);
   geometry_msgs::PointStamped submapPointTransformed;
-
   try {
+    /*ROS_DEBUG_STREAM("Target Frame = " << traversabilityMap_.getMapFrameId());
+    ROS_DEBUG_STREAM("Source Frame = " << submapPoint_.header.frame_id);
+    ROS_DEBUG_STREAM("Source Point.x = " << submapPoint_.point.x);
+    ROS_DEBUG_STREAM("Source Point.y = " << submapPoint_.point.y);*/
+    transformListener_.waitForTransform(traversabilityMap_.getMapFrameId(), submapPoint_.header.frame_id, ros::Time(0), ros::Duration(3.0));
     transformListener_.transformPoint(traversabilityMap_.getMapFrameId(), submapPoint_, submapPointTransformed);
+    ROS_DEBUG_STREAM("Target Point.x = " << submapPointTransformed.point.x);
+    ROS_DEBUG_STREAM("Target Point.y = " << submapPointTransformed.point.y);
+
   } catch (tf::TransformException& ex) {
+    ROS_ERROR("[requestElevationMap] Caught an Error!");
     ROS_ERROR("%s", ex.what());
     return false;
   }
@@ -263,9 +280,9 @@ bool TraversabilityEstimation::requestElevationMap(grid_map_msgs::GridMap& map) 
   submapService.request.length_y = mapLength_.y();
   submapService.request.layers = elevationMapLayers_;
 
-  if (!submapClient_.call(submapService)) return false;
+  if (!submapClient_.call(submapService)) {ROS_DEBUG_STREAM("[requestElevationMap] Service Failed"); return false;}
   map = submapService.response.map;
-
+  ROS_DEBUG_STREAM("[requestElevationMap] Success");
   return true;
 }
 
@@ -364,6 +381,9 @@ bool TraversabilityEstimation::initializeTraversabilityMapFromGridMap(const grid
 void TraversabilityEstimation::gridMapToInitTraversabilityMapCallback(const grid_map_msgs::GridMap& message) {
   grid_map::GridMap gridMap;
   grid_map::GridMapRosConverter::fromMessage(message, gridMap);
+  if (traversabilityMap_.traversabilityMapInitialized()){
+    return;
+  }
   if (!initializeTraversabilityMapFromGridMap(gridMap)) {
     ROS_ERROR(
         "[TraversabilityEstimation::gridMapToInitTraversabilityMapCallback]: "
