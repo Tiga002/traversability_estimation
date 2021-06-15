@@ -112,6 +112,13 @@ class TraversabilityMap {
   grid_map::GridMap getTraversabilityMap();
 
   /*!
+   * Get the Terrain Submap.
+   * @param[in] grid_map::Gridmap Full traversability Gridmap
+   * @return the requested traversability map.
+   */
+  grid_map::GridMap downsamplingMap(const grid_map::GridMap& traversabilityMap);
+
+  /*!
    * Resets the cached traversability values.
    */
   void resetTraversabilityFootprintLayers();
@@ -120,6 +127,11 @@ class TraversabilityMap {
    * Publishes the latest traversability map.
    */
   void publishTraversabilityMap();
+
+  /*!
+   * Publishes the latest terrain map.
+   */
+  void publishTerrainMap();
 
   /*!
    * Checks if the traversability map is initialized.
@@ -164,6 +176,12 @@ class TraversabilityMap {
    * @return true if layers are creates.
    */
   bool createLayers(bool useRawMap);
+
+  /*
+   * Set Robot Position relative to Odom Frame.
+   * @param[in] geometry_msgs::PointStamped
+  */
+  void setRobotPose(geometry_msgs::PointStamped position) ;
 
  private:
   /*!
@@ -332,6 +350,9 @@ class TraversabilityMap {
   //! Publisher of the traversability map.
   ros::Publisher traversabilityMapPublisher_;
 
+  //! Publisher of the terrain map.
+  ros::Publisher terrainMapPublisher_;
+
   //! Footprint publisher.
   ros::Publisher footprintPublisher_;
 
@@ -376,12 +397,21 @@ class TraversabilityMap {
   std::vector<std::string> elevationMapLayers_;
   bool elevationMapInitialized_;
 
+  //! Terrain Submap
+  grid_map::GridMap terrainMap_;
+  std::vector<std::string> terrainMapLayers_;
+  bool terrainMapInitialized_;
+
   //! Mutex lock for traversability map.
   mutable boost::recursive_mutex traversabilityMapMutex_;
   mutable boost::recursive_mutex elevationMapMutex_;
+  mutable boost::recursive_mutex terrainMapMutex_;
 
   //! Z-position of the robot pose belonging to this map.
   double zPosition_;
+
+  //! Center point of the elevation map.
+  geometry_msgs::PointStamped robotPos_relative_to_odom_;
 };
 
 }  // namespace traversability_estimation

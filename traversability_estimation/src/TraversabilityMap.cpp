@@ -55,6 +55,7 @@ TraversabilityMap::TraversabilityMap(ros::NodeHandle& nodeHandle)
 
   readParameters();
   traversabilityMapPublisher_ = nodeHandle_.advertise<grid_map_msgs::GridMap>("traversability_map", 1, true);
+  terrainMapPublisher_ = nodeHandle_.advertise<grid_map_msgs::GridMap>("terrain_map", 1, true);
   footprintPublisher_ = nodeHandle_.advertise<geometry_msgs::PolygonStamped>("footprint_polygon", 1, true);
   untraversablePolygonPublisher_ = nodeHandle_.advertise<geometry_msgs::PolygonStamped>("untraversable_polygon", 1, true);
 }
@@ -76,6 +77,7 @@ bool TraversabilityMap::createLayers(bool useRawMap) {
   }
   scopedLockForElevationMap.unlock();
   // TODO: Adapt map layers to traversability filters.
+  // TODO: Add a layer(terrain_type_)
   boost::recursive_mutex::scoped_lock scopedLockForTraversabilityMap(traversabilityMapMutex_);
   traversabilityMapLayers_.push_back(traversabilityType_);
   traversabilityMapLayers_.push_back(slopeType_);
@@ -186,9 +188,38 @@ void TraversabilityMap::publishTraversabilityMap() {
   }
 }
 
+void TraversabilityMap::publishTerrainMap() {
+  if (!terrainMapPublisher_.getNumSubscribers() < 1) {
+    grid_map_msgs::GridMap mapMessage;
+    boost::recursive_mutex::scoped_lock scopedLockForTerrainMap(terrainMapMutex_);
+    grid_map::GridMap terrainMapCopy = terrainMap_;
+    scopedLockForTerrainMap.unlock();
+    if (terrainMapCopy.exists("upper_bound") && terrainMapCopy.exists("lower_bound")) {
+      terrainMapCopy.add("uncertainty_range", terrainMapCopy.get("upper_bound") - terrainMapCopy.get("lower_bound"));
+    }
+
+    grid_map::GridMapRosConverter::toMessage(terrainMapCopy, mapMessage);
+    mapMessage.info.pose.position.z = zPosition_;
+    terrainMapPublisher_.publish(mapMessage);
+    ROS_DEBUG_STREAM("[TraversabilityMap::publishTerrainMap] Publishing the terrain map !!!");
+  }
+}
+
 grid_map::GridMap TraversabilityMap::getTraversabilityMap() {
   boost::recursive_mutex::scoped_lock scopedLockForTraversabilityMap(traversabilityMapMutex_);
   return traversabilityMap_;
+}
+
+grid_map::GridMap TraversabilityMap::downsamplingMap(const grid_map::GridMap& traversabilityMap){
+  
+  grid_map::Position SubmapPosition(robotPos_relative_to_odom_.point.x, robotPos_relative_to_odom_.point.y);
+  grid_map::Length SubmapLength(1.5, 1.5);
+  grid_map::GridMap subMap;
+  bool isSuccess;
+  subMap = traversabilityMap.getSubmap(SubmapPosition, SubmapLength, isSuccess);
+  ROS_INFO("[Downsampling map]Submap Created with size %f X %f m (%i X %i cells).",
+    subMap.getLength().x(), subMap.getLength().y(), subMap.getSize()(0), subMap.getSize()(1));
+  return subMap;
 }
 
 bool TraversabilityMap::traversabilityMapInitialized() { return traversabilityMapInitialized_; }
@@ -207,6 +238,10 @@ bool TraversabilityMap::computeTraversability() {
   boost::recursive_mutex::scoped_lock scopedLockForElevationMap(elevationMapMutex_);
   grid_map::GridMap elevationMapCopy = elevationMap_;
   scopedLockForElevationMap.unlock();
+  // Terrain Map
+  boost::recursive_mutex::scoped_lock scopedLockForTerrainMap(terrainMapMutex_);
+  grid_map::GridMap terrainMapCopy = terrainMap_;
+  scopedLockForTerrainMap.unlock();
 
   // Initialize timer.
   ros::WallTime start = ros::WallTime::now();
@@ -231,7 +266,15 @@ bool TraversabilityMap::computeTraversability() {
   scopedLockForTraversabilityMap.lock();
   traversabilityMap_ = traversabilityMapCopy;
   scopedLockForTraversabilityMap.unlock();
+
+  // Terrain Map Downsampling
+  terrainMapCopy = downsamplingMap(traversabilityMapCopy);
+  scopedLockForTerrainMap.lock();
+  terrainMap_ = terrainMapCopy;
+  scopedLockForTerrainMap.unlock();
+
   publishTraversabilityMap();
+  publishTerrainMap();
 
   ROS_DEBUG("Traversability map has been updated in %f s.", (ros::WallTime::now() - start).toSec());
   return true;
@@ -981,6 +1024,10 @@ bool TraversabilityMap::mapHasValidTraversabilityAt(double x, double y) const {
   }
 
   return traversabilityMap_.isValid(indexToCheck, traversabilityType_);
+}
+
+void TraversabilityMap::setRobotPose(geometry_msgs::PointStamped position){
+  robotPos_relative_to_odom_ = position;
 }
 
 }  // namespace traversability_estimation
