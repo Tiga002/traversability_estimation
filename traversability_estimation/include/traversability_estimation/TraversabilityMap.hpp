@@ -21,6 +21,7 @@
 #include <sensor_msgs/Image.h>
 #include <std_srvs/Empty.h>
 #include <tf/transform_listener.h>
+#include <image_geometry/pinhole_camera_model.h>
 
 // STD
 #include <string>
@@ -28,6 +29,13 @@
 
 // Boost
 #include <boost/thread/recursive_mutex.hpp>
+
+// OpenCv
+#include "opencv2/core/core.hpp"
+#include "opencv2/imgproc/imgproc.hpp"
+#include "opencv2/calib3d/calib3d.hpp"
+#include "opencv2/highgui/highgui.hpp"
+#include <cv_bridge/cv_bridge.h>
 
 namespace traversability_estimation {
 
@@ -118,6 +126,39 @@ class TraversabilityMap {
    */
   grid_map::GridMap downsamplingMap(const grid_map::GridMap& traversabilityMap);
 
+   /*!
+   * Assign Cost to each grid according to its terrain type from semantic mask
+   * @param[in] grid_map::Gridmap Terrain (Sub) Gridmap
+   * @return the cost assigned terrain traversability map
+   */
+  grid_map::GridMap assignTerrainCost(const grid_map::GridMap& MapIn);
+
+  /*!
+   * Extract Terrain map single grid position relative to camera frame
+   * @param[in] grid_map::Position Single Grid position relative to map frame(odom)
+   * @return grid_map::Position Single Grid position relative to camera frame 
+   */
+  grid_map::Position3 extractSingleGridPosition(const grid_map::Position3& position);
+
+  /*!
+   * Extract Terrain map all grids' position relative to camera frame
+   * @param[in] grid_map::GridMap& Terrain Grid Map
+   * @return std::vector<cv::Point3d> Position of all grid positions relative to camera frame 
+   */
+  std::vector<cv::Point3d> extractAllGridPosition(const grid_map::GridMap& MapOut);
+
+  /*!
+   * Project grid position from Robot Frame onto Image Plane
+   * @param[in] std::vector<cv::Point3d> Vector containing grid positions relative to CameraFrame
+   * @return std::vector<cv::Point2d> Vector containing projected points in pixel coordinates (u,v)
+   */
+  std::vector<cv::Point2d> projectAllGridPosition(const std::vector<cv::Point3d>& GridPosCameraFrame_vector);
+
+  /*!
+   * For debugging, draw the projected points on the image
+   */
+  void drawPoints(const std::vector<cv::Point2d> GridPosPixel_vector);
+
   /*!
    * Resets the cached traversability values.
    */
@@ -181,7 +222,19 @@ class TraversabilityMap {
    * Set Robot Position relative to Odom Frame.
    * @param[in] geometry_msgs::PointStamped
   */
-  void setRobotPose(geometry_msgs::PointStamped position) ;
+  void setRobotPose(geometry_msgs::PointStamped position);
+
+  /*
+   * Set Camera Info with the latest camera_info topic
+   * @param[in] const sensor_msgs::CameraInfoConstPtr& info_msg
+  */
+  void setCameraModel(const sensor_msgs::CameraInfoConstPtr& info_msg);
+
+  /*
+   * Get latest semantic mask
+   * @param[in] const sensor_msgs::ImageConstPtr& image_msg
+  */
+  void getSemanticMask(const sensor_msgs::ImageConstPtr& image_msg);
 
  private:
   /*!
@@ -409,9 +462,39 @@ class TraversabilityMap {
 
   //! Z-position of the robot pose belonging to this map.
   double zPosition_;
+  std::vector<cv::Point3d> odom_frame_3d_position_;
 
   //! Center point of the elevation map.
   geometry_msgs::PointStamped robotPos_relative_to_odom_;
+
+  //! TF listener.
+  tf::TransformListener transformListener_;
+
+  // Semantic mask
+  cv::Mat semantic_mask_;
+  mutable boost::recursive_mutex semanticMaskMutex_;
+
+  //! Camera Info
+  image_geometry::PinholeCameraModel cam_model_;
+  // Projection Matrix (3X4)
+  //cv::Mat P(3,4,cv::DataType<double>::type);
+  //cv::Mat P = cv::Mat::eye(3,4,cv::DataType<double>::type);
+  cv::Mat P_ = (cv::Mat_<double>(3,4) << 2766.880127,0.0,970.500272,0.0,0.0,2790.281982,625.218685,0.0,0.0,0.0,1.0,0.0);
+
+  // Camera Instrinsic
+  cv::Mat K_ = (cv::Mat_<double>(3,3) << 2813.643275, 0.0, 969.285772, 0.0, 2808.326079, 624.049972, 0.0, 0.0, 1.0);
+  // Rotational Matrix
+  cv::Mat ROT_ = (cv::Mat_<double>(3,3) << 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0);
+  // Rodrigues Rotation <atrix
+  cv::Mat Rodrigues_ROT_ = (cv::Mat_<double>(3,3));
+  // Translation Vector (Homogeneous)
+  cv::Mat Thomogeneous_= (cv::Mat_<double>(4,1));
+  // Translation Vector (3X1)
+  cv::Mat T_ = (cv::Mat_<double>(3,1) << 0.0,0.0,0.0); 
+
+  // Distortion Coefficients  :: distortion_model: "plumb_bob"
+  cv::Mat distCoeffs_ = (cv::Mat_<double>(5,1) << -0.134313,-0.025905,0.002181,0.00084,0.0);
+
 };
 
 }  // namespace traversability_estimation

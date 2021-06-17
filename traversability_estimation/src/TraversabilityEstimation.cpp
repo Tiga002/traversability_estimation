@@ -21,6 +21,7 @@ namespace traversability_estimation {
 
 TraversabilityEstimation::TraversabilityEstimation(ros::NodeHandle& nodeHandle)
     : nodeHandle_(nodeHandle),
+      it_(nodeHandle_),
       acceptGridMapToInitTraversabilityMap_(false),
       traversabilityMap_(nodeHandle),
       traversabilityType_("traversability"),
@@ -50,7 +51,8 @@ TraversabilityEstimation::TraversabilityEstimation(ros::NodeHandle& nodeHandle)
   traversabilityFootprint_ =
       nodeHandle_.advertiseService("traversability_footprint", &TraversabilityEstimation::traversabilityFootprint, this);
   saveToBagService_ = nodeHandle_.advertiseService("save_traversability_map_to_bag", &TraversabilityEstimation::saveToBag, this);
-  imageSubscriber_ = nodeHandle_.subscribe(imageTopic_, 1, &TraversabilityEstimation::imageCallback, this);
+  //imageSubscriber_ = nodeHandle_.subscribe(imageTopic_, 1, &TraversabilityEstimation::imageCallback, this);
+  camera_sub_ = it_.subscribeCamera(imageTopic_, 1, &TraversabilityEstimation::imageCB, this);
 
   if (acceptGridMapToInitTraversabilityMap_) {
     gridMapToInitTraversabilityMapSubscriber_ = nodeHandle_.subscribe(
@@ -166,6 +168,12 @@ void TraversabilityEstimation::imageCallback(const sensor_msgs::Image& image) {
   grid_map::GridMapRosConverter::toMessage(imageGridMap_, elevationMap);
   traversabilityMap_.setElevationMap(elevationMap);
 }
+
+void TraversabilityEstimation::imageCB(const sensor_msgs::ImageConstPtr& image_msg, const sensor_msgs::CameraInfoConstPtr& info_msg){
+  traversabilityMap_.setCameraModel(info_msg);
+  traversabilityMap_.getSemanticMask(image_msg);
+}
+
 
 void TraversabilityEstimation::updateTimerCallback(const ros::TimerEvent& timerEvent) { updateTraversability(); }
 

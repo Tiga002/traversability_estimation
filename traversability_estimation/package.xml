@@ -29,7 +29,12 @@
   <depend>xmlrpcpp</depend>
   <depend>cmake_modules</depend>
   <depend>kindr</depend>
+  <depend>image_geometry</depend>
+  <depend>image_transport></depend>
   <build_export_depend>eigen</build_export_depend>
+
+  <build_depend>image_transport</build_depend>
+  <exec_depend>image_transport</exec_depend>
 
 
 </package>

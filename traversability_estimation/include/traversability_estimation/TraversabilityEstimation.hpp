@@ -25,6 +25,8 @@
 #include <sensor_msgs/Image.h>
 #include <std_srvs/Empty.h>
 #include <tf/transform_listener.h>
+#include <image_transport/image_transport.h>
+#include <cv_bridge/cv_bridge.h>
 
 // STD
 #include <string>
@@ -92,6 +94,13 @@ class TraversabilityEstimation {
    * @param image the received image.
    */
   void imageCallback(const sensor_msgs::Image& image);
+
+  /*!
+   * Callback function that receives an image topic and its sibling camera_info
+   * @param image the received image.
+   * @param info_msg camera_info
+   */
+  void imageCB(const sensor_msgs::ImageConstPtr& image_msg, const sensor_msgs::CameraInfoConstPtr& info_msg);
 
   /*!
    * ROS service callback function that computes the traversability of a footprint
@@ -163,6 +172,7 @@ class TraversabilityEstimation {
 
   //! ROS node handle.
   ros::NodeHandle& nodeHandle_;
+  image_transport::ImageTransport it_;
 
   //! ROS service server.
   ros::ServiceServer footprintPathService_;
@@ -182,6 +192,8 @@ class TraversabilityEstimation {
   double imageResolution_;
   double imageMinHeight_;
   double imageMaxHeight_;
+  image_transport::CameraSubscriber camera_sub_;
+  image_transport::Publisher camera_pub_;
 
   //! Grid Map topic to initialize traversability map.
   ros::Subscriber gridMapToInitTraversabilityMapSubscriber_;
@@ -227,6 +239,7 @@ class TraversabilityEstimation {
   const std::string stepType_;
   const std::string roughnessType_;
   const std::string robotSlopeType_;
+
 
   //! Traversability map
   TraversabilityMap traversabilityMap_;

@@ -11,3 +11,4 @@ max_gap_width: 0.3
 grid_map_to_initialize_traversability_map:
   enable: true
   grid_map_topic_name: /elevation_mapping/elevation_map_raw
+image_topic: /camera/rgb/image_rect_color
