@@ -499,6 +499,34 @@ class TraversabilityMap {
   // Distortion Coefficients  :: distortion_model: "plumb_bob"
   cv::Mat distCoeffs_ = (cv::Mat_<double>(5,1) << -0.134313,-0.025905,0.002181,0.00084,0.0);
 
+
+  //! Semantic Mask Color Mapping
+  std::array<int,3> dirt {108,64,20};
+  std::array<int,3> grass {0,102,0};
+  std::array<int,3> tree {0,255,0};
+  std::array<int,3> pole {0,153,153};
+  std::array<int,3> water {0,128,255};
+  std::array<int,3> sky {0,0,255};
+
+  std::array<int,3> vehicle {255,255,0};
+  std::array<int,3> object {255,0,127};
+  std::array<int,3> asphalt {64,64,64};
+  std::array<int,3> building {255,0,0};
+  std::array<int,3> log {102,0,0};
+
+  std::array<int,3> person {204,153,255};
+  std::array<int,3> fence {102,0,204};
+  std::array<int,3> bush {255,153,204};
+  std::array<int,3> concrete {170,170,170};
+  std::array<int,3> barrier {41,121,255};
+
+  std::array<int,3> paddle {134,255,239};
+  std::array<int,3> mud {99,66,34};
+  std::array<int,3> rubble {110,22,138};
+  std::array<int,3> ddirt {0,153,153};
+  std::array<int,3> untraversable {255,255,255};
+
+
 };
 
 }  // namespace traversability_estimation
