@@ -462,7 +462,11 @@ class TraversabilityMap {
 
   //! Z-position of the robot pose belonging to this map.
   double zPosition_;
+
+  // Useful Grid Position in Odom Frame (map frame)
   std::vector<cv::Point3d> odom_frame_3d_position_;
+  std::vector<grid_map::Position3> GridPosOdomFrame_vector_;
+  std::vector<grid_map::Position3> filtered_GridPosOdomFrame_vector_;
 
   //! Center point of the elevation map.
   geometry_msgs::PointStamped robotPos_relative_to_odom_;

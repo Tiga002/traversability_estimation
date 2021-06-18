@@ -219,7 +219,7 @@ grid_map::GridMap TraversabilityMap::downsamplingMap(const grid_map::GridMap& tr
   subMap = traversabilityMap.getSubmap(SubmapPosition, SubmapLength, isSuccess);
   ROS_INFO("[Downsampling map]Submap Created with size %f X %f m (%i X %i cells).",
     subMap.getLength().x(), subMap.getLength().y(), subMap.getSize()(0), subMap.getSize()(1));
-  
+
   return subMap;
 }
 
@@ -1065,7 +1065,8 @@ grid_map::GridMap TraversabilityMap::assignTerrainCost(const grid_map::GridMap& 
   std::string type_ = "traversability_terrain";
   grid_map::GridMap MapOut;
   MapOut = MapIn;
-  MapOut.add("traversability_terrain");
+  MapOut.add("terrain_traversability");
+  MapOut.add("color");
   double nonTraversableMax = 0.0;
   
   // 1: Extract Grid Position &&
@@ -1077,12 +1078,49 @@ grid_map::GridMap TraversabilityMap::assignTerrainCost(const grid_map::GridMap& 
   // 2: Convert Grid Position into Pixel Coordinates
   std::vector<cv::Point2d> GridPosPixel_vector;
   GridPosPixel_vector = projectAllGridPosition(GridPosCameraFrame_vector);
-  /*for(unsigned int i = 0; i < GridPosPixel_vector.size(); ++i){
-    std::cout <<"3D point[Odom]: " << odom_frame_3d_position_[i] << " 3D point[CameraFrame]: " <<  GridPosCameraFrame_vector[i] << " Projected to " << GridPosPixel_vector[i] << std::endl;
-  }
-  if(GridPosPixel_vector.size() != 0){
+  
+  /*if(GridPosPixel_vector.size() != 0){
     drawPoints(GridPosPixel_vector);
   }*/
+
+  // 3: Assign Terrain Cost according to projected point's RGB value
+  //for(cv::Point2d pixel_uv : GridPosPixel_vector){
+  for(unsigned int i=0; i < GridPosPixel_vector.size(); ++i){
+    cv::Vec3b cvColor = semantic_mask_.at<cv::Vec3b>(int(GridPosPixel_vector[i].y), int(GridPosPixel_vector[i].x));
+    std::array<int,3> bgr_color_vector {int(cvColor.val[0]), int(cvColor.val[1]), int(cvColor.val[2])};
+    
+    std::array<int,3> floor {155,155,155};
+    std::array<int,3> shit {255,0,0};
+
+    Eigen::Vector3i colorVector;
+    grid_map::Position terrain_map_grid_pos;
+    grid_map::Index terrain_map_grid_index;
+    
+    terrain_map_grid_pos.x() = filtered_GridPosOdomFrame_vector_[i].x();
+    terrain_map_grid_pos.y() = filtered_GridPosOdomFrame_vector_[i].y();
+    MapOut.getIndex(terrain_map_grid_pos, terrain_map_grid_index);
+
+    if(bgr_color_vector == floor){
+      MapOut.at("terrain_traversability", terrain_map_grid_index) = 1.0;
+      colorVector(0) = floor[0];
+      colorVector(1) = floor[1];
+      colorVector(2) = floor[2];
+    }
+    else if (bgr_color_vector == shit){
+      MapOut.at("terrain_traversability", terrain_map_grid_index) = 0.5;
+      colorVector(0) = floor[0];
+      colorVector(1) = floor[1];
+      colorVector(2) = floor[2];
+    }
+    else{
+      MapOut.at("terrain_traversability", terrain_map_grid_index) = 0.35;
+      colorVector(0) = shit[0];
+      colorVector(1) = shit[1];
+      colorVector(2) = shit[2];
+    }
+    grid_map::colorVectorToValue(colorVector, MapOut.at("color", terrain_map_grid_index));
+  }
+  
   
 
   
@@ -1117,6 +1155,9 @@ grid_map::Position3 TraversabilityMap::extractSingleGridPosition(const grid_map:
 
 std::vector<cv::Point3d> TraversabilityMap::extractAllGridPosition(const grid_map::GridMap& MapOut){
   std::vector<cv::Point3d> GridPosCameraFrame_vector;
+  if (GridPosOdomFrame_vector_.size() != 0){
+    GridPosOdomFrame_vector_.clear();
+  }
   for (grid_map::GridMapIterator iterator(MapOut); !iterator.isPastEnd(); ++iterator){
     grid_map::Position3 position;
     MapOut.getPosition3("elevation", *iterator, position);
@@ -1126,8 +1167,7 @@ std::vector<cv::Point3d> TraversabilityMap::extractAllGridPosition(const grid_ma
     
     if(GridPosCameraFrame.z() >= 0.0){
       GridPosCameraFrame_vector.push_back(cv::Point3d(GridPosCameraFrame.x(),GridPosCameraFrame.y(), GridPosCameraFrame.z()));
-      //GridPosCameraFrame_vector.push_back(cv::Point3d(GridPosCameraFrame.x(),GridPosCameraFrame.y(), 1.0));
-      odom_frame_3d_position_.push_back(cv::Point3d(position.x(),position.y(), position.z()));
+      GridPosOdomFrame_vector_.push_back(position);
     }
   }
   return GridPosCameraFrame_vector;
@@ -1135,28 +1175,29 @@ std::vector<cv::Point3d> TraversabilityMap::extractAllGridPosition(const grid_ma
 
 std::vector<cv::Point2d> TraversabilityMap::projectAllGridPosition(const std::vector<cv::Point3d>& GridPosCameraFrame_vector){
   ROS_DEBUG_STREAM("Start Projection ~!");
+  if (filtered_GridPosOdomFrame_vector_.size() != 0){
+    filtered_GridPosOdomFrame_vector_.clear();
+  }
   std::vector<cv::Point2d> GridPosPixel_vector;
-    for(cv::Point3d point : GridPosCameraFrame_vector){
+    //for(cv::Point3d point : GridPosCameraFrame_vector){
+    for(unsigned int i=0; i < GridPosCameraFrame_vector.size(); ++i){
       cv::Point2d pixel_uv;
-      pixel_uv = cam_model_.project3dToPixel(point);
-      //cv::Point3d re_3d_point;
-      //re_3d_point = cam_model_.projectPixelTo3dRay(pixel_uv);
-      //ROS_DEBUG_STREAM("X: " << point.x << ", Y: " << point.y << ", Z: " << point.z);
-      //ROS_DEBUG_STREAM("u: " << pixel_uv.x << ", v: " << pixel_uv.y);
-      //ROS_DEBUG_STREAM("re_X: " << re_3d_point.x << ", re_Y: " << re_3d_point.y << ", re_Z: " << re_3d_point.z);
-      //ROS_DEBUG_STREAM("Full projection matrix" << cam_model_.fullProjectionMatrix());
+      pixel_uv = cam_model_.project3dToPixel(GridPosCameraFrame_vector[i]);
+      //pixel_uv = cam_model_.project3dToPixel(point);
+
       int width, height;
-      
       width = cam_model_.fullResolution().width;
       height = cam_model_.fullResolution().height;
       if((pixel_uv.x < width) && (pixel_uv.y < height) && (pixel_uv.x >=0) && (pixel_uv.y >=0)){
         GridPosPixel_vector.push_back(pixel_uv);
+        filtered_GridPosOdomFrame_vector_.push_back(GridPosOdomFrame_vector_[i]);
         //ROS_DEBUG_STREAM("3D point: [" << point.x << " , " << point.y << " , " << point.z <<"]");
         //ROS_DEBUG_STREAM("Project to Pixel: (" << pixel_uv.x << " , " << pixel_uv.y << "]");
       }
     }
     ROS_DEBUG_STREAM("GridPosPixel_vector.size = " << GridPosPixel_vector.size());
     ROS_DEBUG_STREAM("GridPosCameraFrame_vector.size = " << GridPosCameraFrame_vector.size());
+    ROS_DEBUG_STREAM("filtered_GridPosOdomFrame_vector_.size = " << filtered_GridPosOdomFrame_vector_.size());
     
     
   
