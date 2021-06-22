@@ -213,12 +213,19 @@ grid_map::GridMap TraversabilityMap::getTraversabilityMap() {
 grid_map::GridMap TraversabilityMap::downsamplingMap(const grid_map::GridMap& traversabilityMap){
   
   grid_map::Position SubmapPosition(robotPos_relative_to_odom_.point.x, robotPos_relative_to_odom_.point.y);
-  grid_map::Length SubmapLength(2.5, 1.5);
+  grid_map::Length SubmapLength(10, 10);
   grid_map::GridMap subMap;
   bool isSuccess;
+  ROS_DEBUG_STREAM("submap position = " << robotPos_relative_to_odom_.point.x << robotPos_relative_to_odom_.point.y);
+
   subMap = traversabilityMap.getSubmap(SubmapPosition, SubmapLength, isSuccess);
   ROS_INFO("[Downsampling map]Submap Created with size %f X %f m (%i X %i cells).",
-    subMap.getLength().x(), subMap.getLength().y(), subMap.getSize()(0), subMap.getSize()(1));
+  subMap.getLength().x(), subMap.getLength().y(), subMap.getSize()(0), subMap.getSize()(1));
+
+  /*for (const auto& layer : subMap.getLayers()) {
+    ROS_DEBUG_STREAM("subMap layers: " << layer);
+  }*/
+
 
   return subMap;
 }
@@ -269,7 +276,8 @@ bool TraversabilityMap::computeTraversability() {
   scopedLockForTraversabilityMap.unlock();
 
   // Terrain Map Downsampling
-  terrainMapCopy = downsamplingMap(traversabilityMapCopy);
+  //terrainMapCopy = downsamplingMap(traversabilityMapCopy);
+  terrainMapCopy = elevationMapCopy;
   scopedLockForTerrainMap.lock();
   // Assign Cost according to terrain types
   //terrainMap_ = terrainMapCopy;
@@ -1035,14 +1043,10 @@ void TraversabilityMap::setRobotPose(geometry_msgs::PointStamped position){
 
 void TraversabilityMap::setCameraModel(const sensor_msgs::CameraInfoConstPtr& info_msg){
   cam_model_.fromCameraInfo(info_msg);
-  /*
-  ROS_DEBUG_STREAM("Tx = " << cam_model_.Tx());
-  ROS_DEBUG_STREAM("Ty = " << cam_model_.Ty());
-  ROS_DEBUG_STREAM("Cx = " << cam_model_.cx());
-  ROS_DEBUG_STREAM("Cy = " << cam_model_.cy());
-  ROS_DEBUG_STREAM("fx = " << cam_model_.fx());
-  ROS_DEBUG_STREAM("fy = " << cam_model_.fy());
-  ROS_DEBUG_STREAM("Full projection matrix" << cam_model_.fullProjectionMatrix());*/
+  
+
+  /*ROS_DEBUG_STREAM("Full projection matrix" << cam_model_.fullProjectionMatrix());
+  */
 }
 
 void TraversabilityMap::getSemanticMask(const sensor_msgs::ImageConstPtr& image_msg){
@@ -1192,18 +1196,21 @@ std::vector<cv::Point3d> TraversabilityMap::extractAllGridPosition(const grid_ma
     grid_map::Position3 position;
     if(!MapOut.isValid(*iterator, "elevation")){
       ROS_INFO("elevation not ava");
-      position.x()=0.0; position.y()=0.0; position.z()=0.0;
     }
-    MapOut.getPosition3("elevation", *iterator, position);
-    //ROS_DEBUG_STREAM("position3 : [" << position.x() << " , " << position.y() << " , " << position.z() << "]");
-    grid_map::Position3 GridPosCameraFrame;
-    GridPosCameraFrame = extractSingleGridPosition(position);
+    else {
+      MapOut.getPosition3("elevation", *iterator, position);
+      position.z() = 0.0;
+      //ROS_DEBUG_STREAM("position3 : [" << position.x() << " , " << position.y() << " , " << position.z() << "]");
+      grid_map::Position3 GridPosCameraFrame;
+      GridPosCameraFrame = extractSingleGridPosition(position);
     
-    if(GridPosCameraFrame.z() >= 0.0){
-      GridPosCameraFrame_vector.push_back(cv::Point3d(GridPosCameraFrame.x(),GridPosCameraFrame.y(), GridPosCameraFrame.z()));
-      GridPosOdomFrame_vector_.push_back(position);
+      if(GridPosCameraFrame.z() >= 0.0){
+        GridPosCameraFrame_vector.push_back(cv::Point3d(GridPosCameraFrame.x(),GridPosCameraFrame.y(), GridPosCameraFrame.z()));
+        GridPosOdomFrame_vector_.push_back(position);
+      }
     }
   }
+  
   return GridPosCameraFrame_vector;
 }
 
@@ -1216,8 +1223,17 @@ std::vector<cv::Point2d> TraversabilityMap::projectAllGridPosition(const std::ve
     //for(cv::Point3d point : GridPosCameraFrame_vector){
     for(unsigned int i=0; i < GridPosCameraFrame_vector.size(); ++i){
       cv::Point2d pixel_uv;
+      /*ROS_DEBUG_STREAM("Get camera info");
+      ROS_DEBUG_STREAM("Tx = " << cam_model_.Tx());
+      ROS_DEBUG_STREAM("Ty = " << cam_model_.Ty());
+      ROS_DEBUG_STREAM("Cx = " << cam_model_.cx());
+      ROS_DEBUG_STREAM("Cy = " << cam_model_.cy());
+      ROS_DEBUG_STREAM("fx = " << cam_model_.fx());
+      ROS_DEBUG_STREAM("fy = " << cam_model_.fy());*/
       pixel_uv = cam_model_.project3dToPixel(GridPosCameraFrame_vector[i]);
       //pixel_uv = cam_model_.project3dToPixel(point);
+      ROS_DEBUG_STREAM("[" << GridPosCameraFrame_vector[i].x << " , " << GridPosCameraFrame_vector[i].y << " , " << GridPosCameraFrame_vector[i].z
+        << "] Project to Pixel: (" << pixel_uv.x << " , " << pixel_uv.y << "]");
 
       int width, height;
       width = cam_model_.fullResolution().width;
@@ -1244,7 +1260,7 @@ void TraversabilityMap::drawPoints(const std::vector<cv::Point2d> GridPosPixel_v
   cv::Mat image;
   image = semantic_mask_;
   for(cv::Point2d uv : GridPosPixel_vector){
-    cv::circle(image, uv, 3, CV_RGB(255,0,0), -1);
+    cv::circle(image, uv, 8, CV_RGB(255,255,255), -1);
   }
   cv::imwrite("/home/tiga/Documents/IRP/dev/testing/test-rellis.jpg", image);
 }

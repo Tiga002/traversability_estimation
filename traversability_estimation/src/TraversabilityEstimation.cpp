@@ -51,7 +51,6 @@ TraversabilityEstimation::TraversabilityEstimation(ros::NodeHandle& nodeHandle)
   traversabilityFootprint_ =
       nodeHandle_.advertiseService("traversability_footprint", &TraversabilityEstimation::traversabilityFootprint, this);
   saveToBagService_ = nodeHandle_.advertiseService("save_traversability_map_to_bag", &TraversabilityEstimation::saveToBag, this);
-  //imageSubscriber_ = nodeHandle_.subscribe(imageTopic_, 1, &TraversabilityEstimation::imageCallback, this);
   camera_sub_ = it_.subscribeCamera(imageTopic_, 1, &TraversabilityEstimation::imageCB, this);
 
   if (acceptGridMapToInitTraversabilityMap_) {
@@ -153,21 +152,6 @@ bool TraversabilityEstimation::loadElevationMap(grid_map_msgs::ProcessFile::Requ
   return true;
 }
 
-void TraversabilityEstimation::imageCallback(const sensor_msgs::Image& image) {
-  if (!getImageCallback_) {
-    grid_map::GridMapRosConverter::initializeFromImage(image, imageResolution_, imageGridMap_, imagePosition_);
-    ROS_INFO("Initialized map with size %f x %f m (%i x %i cells).", imageGridMap_.getLength().x(), imageGridMap_.getLength().y(),
-             imageGridMap_.getSize()(0), imageGridMap_.getSize()(1));
-    imageGridMap_.add("upper_bound", 0.0);  // TODO: Add value for layers.
-    imageGridMap_.add("lower_bound", 0.0);
-    imageGridMap_.add("uncertainty_range", imageGridMap_.get("upper_bound") - imageGridMap_.get("lower_bound"));
-    getImageCallback_ = true;
-  }
-  grid_map::GridMapRosConverter::addLayerFromImage(image, "elevation", imageGridMap_, imageMinHeight_, imageMaxHeight_);
-  grid_map_msgs::GridMap elevationMap;
-  grid_map::GridMapRosConverter::toMessage(imageGridMap_, elevationMap);
-  traversabilityMap_.setElevationMap(elevationMap);
-}
 
 void TraversabilityEstimation::imageCB(const sensor_msgs::ImageConstPtr& image_msg, const sensor_msgs::CameraInfoConstPtr& info_msg){
   traversabilityMap_.setCameraModel(info_msg);
@@ -226,7 +210,6 @@ bool TraversabilityEstimation::updateTraversability() {
     //if (!traversabilityMap_.computeTraversability()) return false;
     ROS_DEBUG("Sending request to %s.", submapServiceName_.c_str());
     if (requestElevationMap(elevationMap)) {
-      ROS_INFO("HERE !!!");
       traversabilityMap_.setElevationMap(elevationMap);
       if (!traversabilityMap_.computeTraversability()) return false;
     } else {
@@ -270,8 +253,8 @@ bool TraversabilityEstimation::requestElevationMap(grid_map_msgs::GridMap& map) 
     //ROS_DEBUG_STREAM("Source Frame = " << submapPoint_.header.frame_id);
     transformListener_.waitForTransform(traversabilityMap_.getMapFrameId(), submapPoint_.header.frame_id, ros::Time(0), ros::Duration(3.0));
     transformListener_.transformPoint(traversabilityMap_.getMapFrameId(), submapPoint_, submapPointTransformed);
-    //ROS_DEBUG_STREAM("Robot Pos @ Odom :: x = " << submapPointTransformed.point.x);
-    //ROS_DEBUG_STREAM("Robot Pos @ Odom :: y = " << submapPointTransformed.point.y);
+    ROS_INFO("Robot Pos @ Odom :: x = %f", submapPointTransformed.point.x);
+    ROS_INFO("Robot Pos @ Odom :: y = %f", submapPointTransformed.point.y);
   } catch (tf::TransformException& ex) {
     ROS_ERROR("[requestElevationMap] Caught an Error!");
     ROS_ERROR("%s", ex.what());
@@ -286,7 +269,7 @@ bool TraversabilityEstimation::requestElevationMap(grid_map_msgs::GridMap& map) 
   submapService.request.length_y = mapLength_.y();
   submapService.request.layers = elevationMapLayers_;
 
-  if (!submapClient_.call(submapService)) {ROS_DEBUG_STREAM("[requestElevationMap] Service Failed"); return false;}
+  if (!submapClient_.call(submapService)) {ROS_ERROR("[requestElevationMap] Service Failed"); return false;}
   map = submapService.response.map;
   ROS_DEBUG_STREAM("[requestElevationMap] Success");
   return true;
@@ -360,7 +343,7 @@ bool TraversabilityEstimation::initializeTraversabilityMapFromGridMap(const grid
         " the traversability map, because current traversability map has been already initialized.");
     return false;
   }
-
+  ROS_INFO("Initializing the Traversability Map with Elevation Map ... ");
   grid_map::GridMap mapWithCheckedLayers = gridMap;
   for (const auto& layer : elevationMapLayers_) {
     if (!mapWithCheckedLayers.exists(layer)) {
@@ -378,9 +361,12 @@ bool TraversabilityEstimation::initializeTraversabilityMapFromGridMap(const grid
 
   grid_map_msgs::GridMap message;
   grid_map::GridMapRosConverter::toMessage(mapWithCheckedLayers, message);
-  traversabilityMap_.setElevationMap(message);
+  if(!traversabilityMap_.setElevationMap(message)){
+    ROS_ERROR("[initializeTraversabilityMapFromGridMap] Set elevation failed"); 
+    return false;
+  }
   if (!traversabilityMap_.computeTraversability()) {
-    ROS_WARN("TraversabilityEstimation: initializeTraversabilityMapFromGridMap: cannot compute traversability.");
+    ROS_ERROR("TraversabilityEstimation: initializeTraversabilityMapFromGridMap: cannot compute traversability.");
     return false;
   }
   return true;

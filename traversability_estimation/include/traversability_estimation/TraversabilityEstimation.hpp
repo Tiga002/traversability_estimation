@@ -88,12 +88,6 @@ class TraversabilityEstimation {
   bool checkFootprintPath(traversability_msgs::CheckFootprintPath::Request& request,
                           traversability_msgs::CheckFootprintPath::Response& response);
 
-  /*!
-   * Callback function that receives an image and converts into
-   * an elevation layer of a grid map.
-   * @param image the received image.
-   */
-  void imageCallback(const sensor_msgs::Image& image);
 
   /*!
    * Callback function that receives an image topic and its sibling camera_info
