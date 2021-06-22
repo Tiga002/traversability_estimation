@@ -248,7 +248,7 @@ bool TraversabilityMap::computeTraversability() {
   scopedLockForElevationMap.unlock();
   // Terrain Map
   boost::recursive_mutex::scoped_lock scopedLockForTerrainMap(terrainMapMutex_);
-  grid_map::GridMap terrainMapCopy = terrainMap_;
+  grid_map::GridMap terrainMapCopy;
   scopedLockForTerrainMap.unlock();
 
   // Initialize timer.
@@ -278,10 +278,11 @@ bool TraversabilityMap::computeTraversability() {
   // Terrain Map Downsampling
   //terrainMapCopy = downsamplingMap(traversabilityMapCopy);
   terrainMapCopy = elevationMapCopy;
+  terrainMapCopy = assignTerrainCost(terrainMapCopy);
   scopedLockForTerrainMap.lock();
   // Assign Cost according to terrain types
   //terrainMap_ = terrainMapCopy;
-  terrainMap_ = assignTerrainCost(terrainMapCopy);
+  terrainMap_ = terrainMapCopy;
   scopedLockForTerrainMap.unlock();
 
   publishTraversabilityMap();
@@ -1041,29 +1042,38 @@ void TraversabilityMap::setRobotPose(geometry_msgs::PointStamped position){
   robotPos_relative_to_odom_ = position;
 }
 
-void TraversabilityMap::setCameraModel(const sensor_msgs::CameraInfoConstPtr& info_msg){
-  cam_model_.fromCameraInfo(info_msg);
-  
-
-  /*ROS_DEBUG_STREAM("Full projection matrix" << cam_model_.fullProjectionMatrix());
-  */
+void TraversabilityMap::getCameraModel_MSG(const sensor_msgs::CameraInfoConstPtr& info_msg){
+  std::lock_guard<std::mutex> lock(camera_info_msg_mutex_);
+  last_camera_info_msg_ = info_msg;
 }
 
-void TraversabilityMap::getSemanticMask(const sensor_msgs::ImageConstPtr& image_msg){
+image_geometry::PinholeCameraModel TraversabilityMap::getCameraModel(){
+  image_geometry::PinholeCameraModel cam_model;
+  std::lock_guard<std::mutex> lock(camera_info_msg_mutex_);
+  cam_model.fromCameraInfo(last_camera_info_msg_);
+  return cam_model;
+}
+
+void TraversabilityMap::getSemanticMask_MSG(const sensor_msgs::ImageConstPtr& image_msg){
+  std::lock_guard<std::mutex> lock(semantic_mask_msg_mutex_);
+  last_semantic_mask_msg_ = image_msg;
+}
+
+cv::Mat TraversabilityMap::getSemanticMask(){
+  cv::Mat semantic_mask;
   cv_bridge::CvImagePtr input_bridge;
   try
   {
-    input_bridge = cv_bridge::toCvCopy(image_msg, sensor_msgs::image_encodings::BGR8);
-    semantic_mask_ = input_bridge->image;
-    //cv::imwrite("/home/tiga/Documents/IRP/dev/testing.test.jpg", semantic_mask_);
+    std::lock_guard<std::mutex> lock(semantic_mask_msg_mutex_);
+    input_bridge = cv_bridge::toCvCopy(last_semantic_mask_msg_, sensor_msgs::image_encodings::BGR8);
+    semantic_mask = input_bridge->image;
   }
   catch(cv_bridge::Exception& e)
   {
     ROS_ERROR("[getSemanticMask] Falied to convert image");
-    return;
   }
+  return semantic_mask;
 }
-
 
 grid_map::GridMap TraversabilityMap::assignTerrainCost(const grid_map::GridMap& MapIn){
   std::string type_ = "traversability_terrain";
@@ -1073,92 +1083,103 @@ grid_map::GridMap TraversabilityMap::assignTerrainCost(const grid_map::GridMap& 
   MapOut.add("color");
   double nonTraversableMax = 0.0;
   
-  // 1: Extract Grid Position &&
-  //    Convert from Odom Frame to Camera Frame
+  // 1: Extract Grid Position && Convert from Odom Frame to Camera Frame
   std::vector<cv::Point3d> GridPosCameraFrame_vector;
   GridPosCameraFrame_vector= extractAllGridPosition(MapOut);
   //ROS_DEBUG_STREAM("GridPosCameraFrame_vector.size() = " << GridPosCameraFrame_vector.size());
-
-  // 2: Convert Grid Position into Pixel Coordinates
-  std::vector<cv::Point2d> GridPosPixel_vector;
-  GridPosPixel_vector = projectAllGridPosition(GridPosCameraFrame_vector);
+  //std::cout << "[STEP-1] Completed~~~~~~~~~~~~~" << std::endl;
   
-  if(GridPosPixel_vector.size() != 0){
-    drawPoints(GridPosPixel_vector);
-  }
-/*
-  // 3: Assign Terrain Cost according to projected point's RGB value
-  //for(cv::Point2d pixel_uv : GridPosPixel_vector){
-  for(unsigned int i=0; i < GridPosPixel_vector.size(); ++i){
-    cv::Vec3b cvColor = semantic_mask_.at<cv::Vec3b>(int(GridPosPixel_vector[i].y), int(GridPosPixel_vector[i].x));
-    std::array<int,3> bgr_color_vector {int(cvColor.val[0]), int(cvColor.val[1]), int(cvColor.val[2])};
-    
-    
+  //std::lock_guard<std::mutex> lock_mask(semantic_mask_msg_mutex_);
+  //std::lock_guard<std::mutex> lock_cam_model(camera_info_msg_mutex_);
+  if (last_semantic_mask_msg_ != NULL && last_camera_info_msg_ != NULL){
+    // 2: Get Latest avaliable semantic mask and camera info
+    semantic_mask_ = getSemanticMask();
+    cam_model_ = getCameraModel();
+    ROS_INFO("Got semantic mask and camera model");
+    //std::cout << "[STEP-2] Completed~~~~~~~~~~~~~" << std::endl;
 
-    Eigen::Vector3i colorVector;
-    grid_map::Position terrain_map_grid_pos;
-    grid_map::Index terrain_map_grid_index;
-    
-    terrain_map_grid_pos.x() = filtered_GridPosOdomFrame_vector_[i].x();
-    terrain_map_grid_pos.y() = filtered_GridPosOdomFrame_vector_[i].y();
-    MapOut.getIndex(terrain_map_grid_pos, terrain_map_grid_index);
+    // 3: Convert Grid Position into Pixel Coordinates
+    std::vector<cv::Point2d> GridPosPixel_vector;
+    GridPosPixel_vector = projectAllGridPosition(GridPosCameraFrame_vector);
+    //std::cout << "[STEP-3] Completed~~~~~~~~~~~~~" << std::endl;
+    /*
+    if(GridPosPixel_vector.size() != 0){
+      drawPoints(GridPosPixel_vector);
+    }
+    */
 
-    if(bgr_color_vector == grass){
-      MapOut.at("terrain_traversability", terrain_map_grid_index) = 0.9;
-      colorVector(0) = grass[0];
-      colorVector(1) = grass[1];
-      colorVector(2) = grass[2];
-    }
-    else if (bgr_color_vector == dirt){
-      MapOut.at("terrain_traversability", terrain_map_grid_index) = 0.8;
-      colorVector(0) = dirt[0];
-      colorVector(1) = dirt[1];
-      colorVector(2) = dirt[2];
-    }
-    else if (bgr_color_vector == water){
-      MapOut.at("terrain_traversability", terrain_map_grid_index) = 0.5;
-      colorVector(0) = water[0];
-      colorVector(1) = water[1];
-      colorVector(2) = water[2];
-    }
-    else if (bgr_color_vector == asphalt){
-      MapOut.at("terrain_traversability", terrain_map_grid_index) = 1.0;
-      colorVector(0) = asphalt[0];
-      colorVector(1) = asphalt[1];
-      colorVector(2) = asphalt[2];
-    }
-    else if (bgr_color_vector == concrete){
-      MapOut.at("terrain_traversability", terrain_map_grid_index) = 1.0;
-      colorVector(0) = concrete[0];
-      colorVector(1) = concrete[1];
-      colorVector(2) = concrete[2];
-    }
-    else if (bgr_color_vector == bush){
-      MapOut.at("terrain_traversability", terrain_map_grid_index) = 0.4;
-      colorVector(0) = bush[0];
-      colorVector(1) = bush[1];
-      colorVector(2) = bush[2];
-    }
-    else if (bgr_color_vector == mud){
-      MapOut.at("terrain_traversability", terrain_map_grid_index) = 0.4;
-      colorVector(0) = mud[0];
-      colorVector(1) = mud[1];
-      colorVector(2) = mud[2];
-    }
-    else{
-      MapOut.at("terrain_traversability", terrain_map_grid_index) = 0.0;
-      colorVector(0) = untraversable[0];
-      colorVector(1) = untraversable[1];
-      colorVector(2) = untraversable[2];
+    // 4: Assign Terrain Cost according to projected point's RGB value
+    for(unsigned int i=0; i < GridPosPixel_vector.size(); ++i){
+      Eigen::Vector3i colorVector;
+      grid_map::Position terrain_map_grid_pos;
+      grid_map::Index terrain_map_grid_index;
+    
+      terrain_map_grid_pos.x() = filtered_GridPosOdomFrame_vector_[i].x();
+      terrain_map_grid_pos.y() = filtered_GridPosOdomFrame_vector_[i].y();
+      MapOut.getIndex(terrain_map_grid_pos, terrain_map_grid_index);
+
+      cv::Point pixel_uv;
+      pixel_uv.x = int(GridPosPixel_vector[i].x);
+      pixel_uv.y = int(GridPosPixel_vector[i].y);
+      cv::Vec3b cvColor = semantic_mask_.at<cv::Vec3b>(pixel_uv);
+      //std::cout << " Pixel [" << pixel_uv.x << ", " << pixel_uv.y << "] = " << cvColor << std::endl;
+      std::array<int,3> bgr_color_vector {int(cvColor.val[2]), int(cvColor.val[1]), int(cvColor.val[0])};
+      
+      if(bgr_color_vector == grass){
+        MapOut.at("terrain_traversability", terrain_map_grid_index) = 0.9;
+        colorVector(0) = grass[0];
+        colorVector(1) = grass[1];
+        colorVector(2) = grass[2];
+      }
+      else if (bgr_color_vector == dirt){
+        MapOut.at("terrain_traversability", terrain_map_grid_index) = 0.8;
+        colorVector(0) = dirt[0];
+        colorVector(1) = dirt[1];
+        colorVector(2) = dirt[2];
+      }
+      else if (bgr_color_vector == water){
+        MapOut.at("terrain_traversability", terrain_map_grid_index) = 0.5;
+        colorVector(0) = water[0];
+        colorVector(1) = water[1];
+        colorVector(2) = water[2];
+      }
+      else if (bgr_color_vector == asphalt){
+        MapOut.at("terrain_traversability", terrain_map_grid_index) = 1.0;
+        colorVector(0) = asphalt[0];
+        colorVector(1) = asphalt[1];
+        colorVector(2) = asphalt[2];
+      }
+      else if (bgr_color_vector == concrete){
+        MapOut.at("terrain_traversability", terrain_map_grid_index) = 1.0;
+        colorVector(0) = concrete[0];
+        colorVector(1) = concrete[1];
+        colorVector(2) = concrete[2];
+      }
+      else if (bgr_color_vector == bush){
+        MapOut.at("terrain_traversability", terrain_map_grid_index) = 0.4;
+        colorVector(0) = bush[0];
+        colorVector(1) = bush[1];
+        colorVector(2) = bush[2];
+      }
+      else if (bgr_color_vector == mud){
+        MapOut.at("terrain_traversability", terrain_map_grid_index) = 0.4;
+        colorVector(0) = mud[0];
+        colorVector(1) = mud[1];
+        colorVector(2) = mud[2];
+      }
+      else{
+        MapOut.at("terrain_traversability", terrain_map_grid_index) = 0.0;
+        colorVector(0) = untraversable[0];
+        colorVector(1) = untraversable[1];
+        colorVector(2) = untraversable[2];
     }
     grid_map::colorVectorToValue(colorVector, MapOut.at("color", terrain_map_grid_index));
+    //std::cout << "[STEP-4] Completed~~~~~~~~~~~~~" << std::endl;
+    }
+
   }
   
-  */
-
-  
   return MapOut;
-
 }
 
 grid_map::Position3 TraversabilityMap::extractSingleGridPosition(const grid_map::Position3& position){
@@ -1193,11 +1214,11 @@ std::vector<cv::Point3d> TraversabilityMap::extractAllGridPosition(const grid_ma
     GridPosOdomFrame_vector_.clear();
   }
   for (grid_map::GridMapIterator iterator(MapOut); !iterator.isPastEnd(); ++iterator){
-    grid_map::Position3 position;
     if(!MapOut.isValid(*iterator, "elevation")){
       ROS_INFO("elevation not ava");
     }
     else {
+      grid_map::Position3 position;
       MapOut.getPosition3("elevation", *iterator, position);
       position.z() = 0.0;
       //ROS_DEBUG_STREAM("position3 : [" << position.x() << " , " << position.y() << " , " << position.z() << "]");
@@ -1223,8 +1244,7 @@ std::vector<cv::Point2d> TraversabilityMap::projectAllGridPosition(const std::ve
     //for(cv::Point3d point : GridPosCameraFrame_vector){
     for(unsigned int i=0; i < GridPosCameraFrame_vector.size(); ++i){
       cv::Point2d pixel_uv;
-      /*ROS_DEBUG_STREAM("Get camera info");
-      ROS_DEBUG_STREAM("Tx = " << cam_model_.Tx());
+      /*ROS_DEBUG_STREAM("Tx = " << cam_model_.Tx());
       ROS_DEBUG_STREAM("Ty = " << cam_model_.Ty());
       ROS_DEBUG_STREAM("Cx = " << cam_model_.cx());
       ROS_DEBUG_STREAM("Cy = " << cam_model_.cy());
@@ -1232,12 +1252,13 @@ std::vector<cv::Point2d> TraversabilityMap::projectAllGridPosition(const std::ve
       ROS_DEBUG_STREAM("fy = " << cam_model_.fy());*/
       pixel_uv = cam_model_.project3dToPixel(GridPosCameraFrame_vector[i]);
       //pixel_uv = cam_model_.project3dToPixel(point);
-      ROS_DEBUG_STREAM("[" << GridPosCameraFrame_vector[i].x << " , " << GridPosCameraFrame_vector[i].y << " , " << GridPosCameraFrame_vector[i].z
-        << "] Project to Pixel: (" << pixel_uv.x << " , " << pixel_uv.y << "]");
+
 
       int width, height;
-      width = cam_model_.fullResolution().width;
-      height = cam_model_.fullResolution().height;
+      //width = cam_model_.fullResolution().width;
+      //height = cam_model_.fullResolution().height;
+      width = 640;
+      height = 400;
       if((pixel_uv.x < width) && (pixel_uv.y < height) && (pixel_uv.x >=0) && (pixel_uv.y >=0)){
         GridPosPixel_vector.push_back(pixel_uv);
         filtered_GridPosOdomFrame_vector_.push_back(GridPosOdomFrame_vector_[i]);
@@ -1258,9 +1279,14 @@ std::vector<cv::Point2d> TraversabilityMap::projectAllGridPosition(const std::ve
 void TraversabilityMap::drawPoints(const std::vector<cv::Point2d> GridPosPixel_vector){
   cv_bridge::CvImagePtr input_bridge;
   cv::Mat image;
-  image = semantic_mask_;
+    boost::recursive_mutex::scoped_lock scopedLockForSemanticMask(semanticMaskMutex_);
+    scopedLockForSemanticMask.unlock();
+    scopedLockForSemanticMask.lock();
+    image = semantic_mask_;
+    scopedLockForSemanticMask.unlock();
+    //cv::imwrite("/home/tiga/Documents/I
   for(cv::Point2d uv : GridPosPixel_vector){
-    cv::circle(image, uv, 8, CV_RGB(255,255,255), -1);
+    cv::circle(image, uv, 3, CV_RGB(255,255,255), -1);
   }
   cv::imwrite("/home/tiga/Documents/IRP/dev/testing/test-rellis.jpg", image);
 }

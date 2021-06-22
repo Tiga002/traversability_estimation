@@ -228,13 +228,25 @@ class TraversabilityMap {
    * Set Camera Info with the latest camera_info topic
    * @param[in] const sensor_msgs::CameraInfoConstPtr& info_msg
   */
-  void setCameraModel(const sensor_msgs::CameraInfoConstPtr& info_msg);
+  void getCameraModel_MSG(const sensor_msgs::CameraInfoConstPtr& info_msg);
 
   /*
-   * Get latest semantic mask
+   * Set Camera Info with the latest camera_info topic
+  */
+  image_geometry::PinholeCameraModel getCameraModel();
+
+  /*
+   * Get latest semantic mask msg
    * @param[in] const sensor_msgs::ImageConstPtr& image_msg
   */
-  void getSemanticMask(const sensor_msgs::ImageConstPtr& image_msg);
+  void getSemanticMask_MSG(const sensor_msgs::ImageConstPtr& image_msg);
+
+  /*
+   * Get latest semantic mask 
+   * @param[in] const sensor_msgs::ImageConstPtr& image_msg
+  */
+  cv::Mat getSemanticMask();
+  
 
  private:
   /*!
@@ -478,6 +490,12 @@ class TraversabilityMap {
   cv::Mat semantic_mask_;
   mutable boost::recursive_mutex semanticMaskMutex_;
 
+  std::mutex semantic_mask_msg_mutex_;
+  sensor_msgs::ImageConstPtr last_semantic_mask_msg_;
+
+  std::mutex camera_info_msg_mutex_;
+  sensor_msgs::CameraInfoConstPtr last_camera_info_msg_;
+
   //! Camera Info
   image_geometry::PinholeCameraModel cam_model_;
   // Projection Matrix (3X4)
@@ -500,7 +518,7 @@ class TraversabilityMap {
   cv::Mat distCoeffs_ = (cv::Mat_<double>(5,1) << -0.134313,-0.025905,0.002181,0.00084,0.0);
 
 
-  //! Semantic Mask Color Mapping
+  //! Semantic Mask Color Mapping [RGB]
   std::array<int,3> dirt {108,64,20};
   std::array<int,3> grass {0,102,0};
   std::array<int,3> tree {0,255,0};

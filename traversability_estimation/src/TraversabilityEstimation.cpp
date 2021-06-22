@@ -154,8 +154,8 @@ bool TraversabilityEstimation::loadElevationMap(grid_map_msgs::ProcessFile::Requ
 
 
 void TraversabilityEstimation::imageCB(const sensor_msgs::ImageConstPtr& image_msg, const sensor_msgs::CameraInfoConstPtr& info_msg){
-  traversabilityMap_.setCameraModel(info_msg);
-  traversabilityMap_.getSemanticMask(image_msg);
+  traversabilityMap_.getCameraModel_MSG(info_msg);
+  traversabilityMap_.getSemanticMask_MSG(image_msg);
 }
 
 
